@@ -40,8 +40,8 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="../../includes;../../deps/boost.uuid;../../deps/boost.process;../../deps/json_spirit_v3.00;../../deps/sqlite3pp-read-only;../../deps/sqlite-amalgamation-3_6_12;../../deps/pdl-0.3.0/include;../../deps/moost_http/include;../../deps/uriparser-0.7.5/include;../../deps/libcurl-7.19.3/include"
-				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;_WIN32_WINNT;WIN32_LEAN_AND_MEAN;NOMINMAX"
+				AdditionalIncludeDirectories="../../includes;../../deps/boost.uuid;../../deps/boost.process;../../deps/json_spirit_v3.00;&quot;../../deps/sqlite3pp-read-only&quot;;&quot;../../deps/sqlite-amalgamation-3_6_12&quot;;&quot;../../deps/pdl-0.3.0/include&quot;;../../deps/moost_http/include;&quot;../../deps/uriparser-0.7.5/include&quot;;&quot;../../deps/curl-7.19.5/include&quot;"
+				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;_WIN32_WINNT=0x0500;WIN32_LEAN_AND_MEAN;NOMINMAX;CURL_STATICLIB"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -61,7 +61,6 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="curllib.lib"
 				OutputFile="..\debug\bin\$(ProjectName).exe"
 				LinkIncremental="2"
 				AdditionalLibraryDirectories="../debug/lib"
@@ -119,8 +118,8 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="../../includes;../../deps/boost.uuid;../../deps/boost.process;../../deps/json_spirit_v3.00;../../deps/sqlite3pp-read-only;../../deps/sqlite-amalgamation-3_6_12;../../deps/pdl-0.3.0/include;../../deps/moost_http/include;../../deps/uriparser-0.7.5/include;../../deps/libcurl-7.19.3/include"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;_WIN32_WINNT;WIN32_LEAN_AND_MEAN;NOMINMAX"
+				AdditionalIncludeDirectories="../../includes;../../deps/boost.uuid;../../deps/boost.process;../../deps/json_spirit_v3.00;&quot;../../deps/sqlite3pp-read-only&quot;;&quot;../../deps/sqlite-amalgamation-3_6_12&quot;;&quot;../../deps/pdl-0.3.0/include&quot;;../../deps/moost_http/include;&quot;../../deps/curl-7.19.5/include&quot;"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;_WIN32_WINNT=0x0500;WIN32_LEAN_AND_MEAN;NOMINMAX;CURL_STATICLIB"
 				RuntimeLibrary="2"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -138,7 +137,6 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="curllib.lib"
 				OutputFile="..\release\bin\$(ProjectName).exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="../release/lib"
