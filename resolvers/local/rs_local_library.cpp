@@ -173,6 +173,7 @@ local::find_candidates(rq_ptr rq, unsigned int limit)
     return candidates;
 }
 
+// todo: set content-encoding
 bool
 local::authed_http_handler(const playdar_request& req, playdar_response& resp, playdar::auth& pauth) 
 { 
@@ -216,7 +217,6 @@ local::authed_http_handler(const playdar_request& req, playdar_response& resp, p
         return false;
     }
 
-
     string retval;
     if( req.getvar_exists( "jsonp" ))
     {
@@ -253,8 +253,9 @@ local::anon_http_handler(const playdar_request& req, playdar_response& resp, pla
    return false; 
 }
 
-json_spirit::Object 
-local::get_capabilities() const
+//value
+json_spirit::Value
+local::capabilities() const
 {
     json_spirit::Object o;
     o.push_back( json_spirit::Pair( "plugin", name() ));

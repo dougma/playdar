@@ -50,23 +50,28 @@ Library *gLibrary;
 
 int scanned, skipped, ignored = 0;
 
-string url_encode( const string& p )
+
+// replace whitespace and other control codes with ' ' and replace multiple whitespace with single
+string 
+fixspaces(const string& s)
 {
-    // url encode everything between '/' character
-    vector<std::string> v;
-    split(v, p, boost::is_any_of( "/" ));
-    string ret = "";
-    bool first = true;
-    BOOST_FOREACH(const string& s, v) {
-        if (first) {
-            first = false;
+    string r;
+    bool prevWasSpace = false;
+    r.reserve(s.length());
+    for (string::const_iterator i = s.begin(); i != s.end(); i++) {
+        if (*i > 0 && *i <= ' ') {
+            if (!prevWasSpace) {
+                r += ' ';
+                prevWasSpace = true;
+            }
         } else {
-            ret += "/";
+            r += *i;
+            prevWasSpace = false;
         }
-        ret += playdar::utils::url_encode(s);
     }
-    return ret;
+    return r;
 }
+
 
 string urlify(const string& p)
 {
@@ -101,7 +106,7 @@ bool scan(const Path& p, map<string, int>& mtimes)
         DirIt end_itr;
         for(DirIt itr( p ); itr != end_itr; ++itr){
             if ( bfs::is_directory( itr->status() ) ){
-                cout << "DIR: " << toUtf8(itr->path().string()) << endl;
+                cout << "DIR:\t" << toUtf8(itr->path().string()) << endl;
                 scan(itr->path(), mtimes);
             } else {
                 // is this file an audio file we understand?
@@ -130,7 +135,9 @@ bool scan(const Path& p, map<string, int>& mtimes)
             }
         }
     }
-    catch(std::exception const& e) { cerr << e.what() << endl;}
+    catch(std::exception const& e) { 
+        cerr << e.what() << endl;
+    }
     //catch(...) { cout << "Fail at " << p.string() << endl; }
 
     return true;
@@ -173,6 +180,7 @@ bool add_file(const Path& p, int mtime)
         boost::trim(album);
         boost::trim(track);
         if (artist.length()==0 || track.length()==0) {
+            cout << "NOTAGS:\t" << toUtf8(p.string()) << endl;
             ignored++;
             return false;
         }
@@ -196,18 +204,13 @@ bool add_file(const Path& p, int mtime)
                             track, 
                             tag->track() );
 
-       /* cout << "-- TAG --" << endl;
-        cout << "title   - \"" << tag->title()   << "\"" << endl;
-        cout << "artist  - \"" << tag->artist()  << "\"" << endl;
-        cout << "album   - \"" << tag->album()   << "\"" << endl;
-        cout << "year    - \"" << tag->year()    << "\"" << endl;
-        cout << "comment - \"" << tag->comment() << "\"" << endl;
-        cout << "track   - \"" << tag->track()   << "\"" << endl;
-        cout << "genre   - \"" << tag->genre()   << "\"" << endl;*/
-        cout << "T " 
-             << tag->artist() << "\t"
-             << tag->album() << "\t"
-             << tag->title() << "\t" << endl;
+        // fixspaces ensures the field separation doesn't get messed up
+        // this output is all for display purposes, so munged control-codes are ok
+        cout << "TRACK:\t" 
+             << fixspaces(artist) << "\t" 
+             << fixspaces(album)  << "\t" 
+             << fixspaces(track)  << "\t"
+             << fixspaces(toUtf8(p.string())) << endl;
 
         scanned++;
         return true;

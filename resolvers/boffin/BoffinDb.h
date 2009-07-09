@@ -31,8 +31,9 @@
 class BoffinDb
 {
 public:
-    typedef boost::tuple<std::string, float, int> TagCloudVecItem;
-    typedef std::vector<TagCloudVecItem> TagCloudVec;       // tagname, total weight, track count
+    // TagCloudVecItem tuple: tagname, total weight, track count, total time (seconds)
+    typedef boost::tuple<std::string, float, int, int> TagCloudVecItem;              
+    typedef std::vector<TagCloudVecItem> TagCloudVec;       
     typedef std::vector< std::pair<int, float> > TagVec;                        // tag_id, weight
     typedef std::map<int, TagVec> ArtistTagMap;
 
@@ -48,10 +49,10 @@ public:
 
     // for each track without tags, call f(track_id, artist_sortname, album_sortname, track_sortname)
     template<typename Functor>
-    void map_files_without_tags(Functor f)
+    void map_tracks_without_tags(Functor f)
     {
         sqlite3pp::query qry(m_db, 
-            "SELECT pd.file_join.track, pd.artist.sortname, pd.album.sortname, pd.track.sortname FROM pd.file_join "
+            "SELECT DISTINCT pd.file_join.track, pd.artist.sortname, pd.album.sortname, pd.track.sortname FROM pd.file_join "
             "INNER JOIN pd.artist ON pd.file_join.artist = pd.artist.id "
             "LEFT JOIN pd.album ON pd.file_join.album = pd.album.id "
             "INNER JOIN pd.track ON pd.file_join.track = pd.track.id "
@@ -136,7 +137,9 @@ public:
         }
         return count;
     }
-    
+
+    boost::tuple<int, int> summary();
+
     sqlite3pp::database& db()
     {
         return m_db;

@@ -26,7 +26,7 @@
 #include <moost/http.hpp>
 
 #include "playdar/application.h"
-#include "playdar/auth.hpp"
+#include "playdar/auth.h"
 
 namespace playdar {
 
@@ -41,10 +41,6 @@ public:
     
 private:
 
-    playdar::auth * m_pauth;    
-
-    std::string sid_to_url(source_uid sid); 
-    void handle_json_query(std::string query, const moost::http::request& req, moost::http::reply& rep);
     void handle_rest_api( const playdar_request& req, moost::http::reply& rep, std::string permissions);
 
     void serve_body(const class playdar_response&, moost::http::reply& rep);
@@ -68,7 +64,9 @@ private:
     void handle_comet( const playdar_request& , moost::http::reply& );
 
     std::string handle_queries_root(const playdar_request& req);
+
     MyApplication * m_app;
+    playdar::auth * m_pauth;    
    
     typedef std::map< const std::string, boost::function<void( const moost::http::request&, moost::http::reply& )> > HandlerMap;
     HandlerMap m_urlHandlers;

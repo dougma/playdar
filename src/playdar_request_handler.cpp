@@ -38,6 +38,7 @@
 #include "playdar/track_rq_builder.hpp"
 #include "playdar/pluginadaptor.h"
 #include "playdar/utils/urlencoding.hpp"
+#include "playdar/utils/htmlentities.hpp"
 #include "playdar/CometSession.hpp"
 #include "playdar/HttpAsyncAdaptor.hpp"
 
@@ -45,21 +46,14 @@ using namespace std;
 
 namespace playdar {
 
-/*
-
-    Known gaping security problem:
-    not doing htmlentities() on user-provided data before rendering HTML
-    so there are many script-injection possibilities atm.
-    TODO write/find an htmlentities method and apply liberally.
-
-*/
+using namespace utils;
 
 void 
 playdar_request_handler::init(MyApplication * app)
 {
     m_disableAuth = app->conf()->get<bool>( "disableauth", false );
     cout << "HTTP handler online." << endl;
-    m_pauth = new playdar::auth(app->conf()->get<string>( "db", "" ));
+    m_pauth = new playdar::auth(app->conf()->get<string>( "authdb", "" ));
     m_app = app;
     // built-in handlers:
     m_urlHandlers[ "" ] = boost::bind( &playdar_request_handler::handle_root, this, _1, _2 );
@@ -71,7 +65,6 @@ playdar_request_handler::init(MyApplication * app)
     m_urlHandlers[ "queries" ] = boost::bind( &playdar_request_handler::handle_queries, this, _1, _2 );
     m_urlHandlers[ "static" ] = boost::bind( &playdar_request_handler::serve_static_file, this, _1, _2 );
     m_urlHandlers[ "sid" ] = boost::bind( &playdar_request_handler::handle_sid, this, _1, _2 );
-    //m_urlHandlers[ "capabilities" ] = boost::bind( &playdar_request_handler::handle_capabilities, this, _1, _2 );
     m_urlHandlers[ "comet" ] = boost::bind( &playdar_request_handler::handle_comet, this, _1, _2 );
     
     //Local Collection / Main API plugin callbacks:
@@ -86,29 +79,27 @@ playdar_request_handler::init(MyApplication * app)
     }
 }
 
-
-string 
-playdar_request_handler::sid_to_url(source_uid sid)
-{
-    string u = app()->conf()->httpbase();
-    u += "/sid/" + sid;
-    return u;
-}
-
-
 void 
 playdar_request_handler::handle_request(const moost::http::request& req, moost::http::reply& rep)
 {
     //TODO: Handle % encodings
     
-    cout << "HTTP " << req.method << " " << req.uri << endl;
+    cout << "HTTP " << req.method << " " << req.uri << " " << req.origin << endl;
+    if( req.origin != "127.0.0.1" &&
+        req.origin != "::1" && // not tested the ipv6 check
+        req.origin != "0:0:0:0:0:0:0:1" && 
+        req.uri.substr(0,5) != "/sid/" )
+    {
+        cout << "BLOCKED. Only localhost may access non /sid/ urls." << endl;
+        rep.stock_reply(moost::http::reply::unauthorized);
+        return;
+    }
     
     boost::tokenizer<boost::char_separator<char> > tokenizer(req.uri, boost::char_separator<char>("/?"));
     string base;
     if( tokenizer.begin() != tokenizer.end())
         base = *tokenizer.begin();
 
-//     
     boost::to_lower(base);
     HandlerMap::iterator handler = m_urlHandlers.find( base );
     if( handler != m_urlHandlers.end())
@@ -128,9 +119,11 @@ void
 playdar_request_handler::handle_auth1( const playdar_request& req,
                                        moost::http::reply& rep)
 {
-    if( !req.getvar_exists("website") ||
-        !req.getvar_exists("name") )
-                return;
+    if( !req.getvar_exists("website") || !req.getvar_exists("name") )
+    {
+        rep.stock_reply(moost::http::reply::bad_request);
+        return;
+    }
 
     string ftoken = app()->resolver()->gen_uuid();
     m_pauth->add_formtoken( ftoken );
@@ -149,11 +142,11 @@ playdar_request_handler::handle_auth1( const playdar_request& req,
         vars["<%URL%>"]="";
         if(req.getvar_exists("receiverurl"))
         {
-            vars["<%URL%>"] = req.getvar("receiverurl");
+            vars["<%URL%>"] = htmlentities(req.getvar("receiverurl"));
         }
-        vars["<%FORMTOKEN%>"]=ftoken;
-        vars["<%WEBSITE%>"]=req.getvar("website");
-        vars["<%NAME%>"]=req.getvar("name");
+        vars["<%FORMTOKEN%>"]=ftoken;   // ours. it's clean.
+        vars["<%WEBSITE%>"]=htmlentities(req.getvar("website"));
+        vars["<%NAME%>"]=htmlentities(req.getvar("name"));
         string filename = app()->conf()->get(string("www_root"), string("www")).append("/static/auth.html");
         serve_dynamic(rep, filename, vars);
     }
@@ -176,8 +169,7 @@ playdar_request_handler::handle_auth2( const playdar_request& req, moost::http::
     {
         string tok = app()->resolver()->gen_uuid(); 
         m_pauth->create_new(tok, req.postvar("website"), req.postvar("name"), req.useragent() );
-        if( !req.postvar_exists("receiverurl") ||
-            req.postvar("receiverurl")=="" )
+        if( !req.postvar_exists("receiverurl") || req.postvar("receiverurl")=="" )
         {
             if (req.postvar_exists("json")) {
                 // json response
@@ -190,23 +182,28 @@ playdar_request_handler::handle_auth2( const playdar_request& req, moost::http::
             } else {
                 // webpage response
                 map<string,string> vars;
-                vars["<%WEBSITE%>"]=req.postvar("website");
-                vars["<%NAME%>"]=req.postvar("name");
-                vars["<%AUTHCODE%>"]=tok;
+                vars["<%WEBSITE%>"]=htmlentities(req.postvar("website"));
+                vars["<%NAME%>"]=htmlentities(req.postvar("name"));
+                vars["<%AUTHCODE%>"]=tok;   // token is ours, it's clean.
                 string filename = app()->conf()->get(string("www_root"), string("www")).append("/static/auth.na.html");
                 serve_dynamic(rep, filename, vars);
             }
         }
         else
         {
-            ostringstream os;
             const string& recvurl = req.postvar( "receiverurl" );
-            os  << recvurl
-            << ( recvurl.find( "?" ) == string::npos ? "?" : "&" )
-            << "authtoken=" << tok
-            << "#" << tok;
-            rep.add_header( "Location", os.str() );
-            rep.stock_reply(moost::http::reply::moved_permanently);
+            if (recvurl.find_first_of("\r\n") == string::npos) {
+                // receiverurl is clean enough
+                ostringstream os;
+                os  << recvurl
+                << ( recvurl.find( "?" ) == string::npos ? "?" : "&" )
+                << "authtoken=" << tok
+                << "#" << tok;
+                rep.add_header( "Location", os.str() );
+                rep.stock_reply(moost::http::reply::moved_permanently);
+            } else {
+                rep.stock_reply(moost::http::reply::bad_request);
+            }
         }
     }
     else
@@ -234,7 +231,7 @@ playdar_request_handler::handle_root( const playdar_request& req,
                                       moost::http::reply& rep)
 {
     ostringstream os;
-    os  << "<h2>" << app()->conf()->name() << "</h2>"
+    os  << "<h2>" << htmlentities(app()->conf()->name()) << "</h2>"
            "<p>"
            "Your Playdar server is running! Websites and applications that "
            "support Playdar will ask your permission, and then be able to "
@@ -243,7 +240,7 @@ playdar_request_handler::handle_root( const playdar_request& req,
 
            "<p>"
            "For quick and dirty resolving, you can try constructing an URL like: <br/> "
-           "<code>" << app()->conf()->httpbase() << "/quickplay/ARTIST/ALBUM/TRACK</code><br/>"
+           "<code>" << htmlentities(app()->conf()->httpbase()) << "/quickplay/ARTIST/ALBUM/TRACK</code><br/>"
            "</p>"
 
            "<p>"
@@ -270,26 +267,23 @@ playdar_request_handler::handle_root( const playdar_request& req,
     BOOST_FOREACH(const pa_ptr pap, app()->resolver()->resolvers())
     {
         if(pap->weight() == 0) break;
-        if(lw == pap->weight()) dupe = true; else dupe = false;
+        dupe = (lw == pap->weight());
         if(lw==0) lw = pap->weight();
         if(!dupe) bgc = (i++%2==0) ? "lightgrey" : "" ;
         os  << "<tr style=\"background-color: " << bgc << "\">"
-            << "<td>" << pap->rs()->name() << "</td>"
-            << "<td>" << pap->weight() << "</td>"
-            << "<td>" << pap->preference() << "</td>"
-            << "<td>" << pap->targettime() << "ms</td>"
-            << "<td>" << (pap->localonly()?"local":"global") << "</td>";
-        os << "<td>" ;
-
+            "<td>" << htmlentities(pap->rs()->name()) << "</td>"
+            "<td>" << pap->weight() << "</td>"
+            "<td>" << pap->preference() << "</td>"
+            "<td>" << pap->targettime() << "ms</td>"
+            "<td>" << (pap->localonly()?"local":"global") << "</td>"
+            "<td>";
         string name = pap->rs()->name();
         boost::algorithm::to_lower( name );
-        os << "<a href=\""<< name << "/config" <<"\">" << name << " config</a><br/> " ;
-
-        os  << "</td></tr>" << endl;
+        os << "<a href=\"" << htmlentities(name) << "/config\">" 
+           << htmlentities(name) << " config</a><br/></td>"
+        "</tr>" << endl;
     }
-    os  << "</table>"
-        << "</p>"
-        ;
+    os  << "</table></p>";
     
     os  << "<p>"
            "<h3>Other Plugins</h3>"
@@ -306,9 +300,9 @@ playdar_request_handler::handle_root( const playdar_request& req,
         string name = pap->rs()->name();
         boost::algorithm::to_lower( name );
         os  <<  "<tr style=\"background-color: " << bgc << "\">"
-                "<td>" << pap->rs()->name() << "</td>"
-                "<td><a href=\"" << name << "/config" <<"\">" 
-                << name << " config</a>" 
+                "<td>" << htmlentities(pap->rs()->name()) << "</td>"
+                "<td><a href=\"" << htmlentities(name) << "/config" <<"\">" 
+                << htmlentities(name) << " config</a>" 
                 "</td></tr>" << endl;
     }
     os  << "</table></p>" << endl;
@@ -379,17 +373,15 @@ playdar_request_handler::handle_settings( const playdar_request& req,
     {
         ostringstream os;
         os  << "<h2>Configuration</h2>"
-            << "<p>"
-            << "Config options are stored as a JSON object in the file: "
-            << "<code>" << app()->conf()->filename() << "</code>"
-            << "</p>"
-            << "<p>"
-            << "The contents of the file are shown below, to edit it use "
-            << "your favourite text editor."
-            << "</p>"
-            << "<pre>"
-            << app()->conf()->str()
-            << "</pre>"
+            "<p>"
+            "Config options are stored as a JSON object in the file: "
+            "<code>" << htmlentities(app()->conf()->filename()) << "</code>"
+            "</p>"
+            "<p>"
+            "The contents of the file are shown below, to edit it use "
+            "your favourite text editor."
+            "</p>"
+            "<pre>" << htmlentities(app()->conf()->str()) << "</pre>"
             ;
         serve_body(os.str(), rep);
     }
@@ -397,28 +389,43 @@ playdar_request_handler::handle_settings( const playdar_request& req,
     {
         ostringstream os;
         os  << "<h2>Authenticated Sites</h2>";
-        typedef map<string,string> auth_t;
-        if( req.getvar_exists("revoke"))
+
+        if (req.getvar_exists("revoke"))
         {
             m_pauth->deauth(req.getvar("revoke"));
+
+            if (req.getvar_exists("jsonp")) 
+            {
+                // handle the entire jsonp response right here:
+                string content = req.getvar("jsonp") + "();\n";
+                rep.set_status(moost::http::reply::ok);
+                rep.add_header("Content-Type", "text/javascript; charset=utf-8");
+                rep.add_header("Content-Length", content.size());
+                rep.write_content(content);
+                rep.write_finish();
+                return;
+            } 
+
             os  << "<p style=\"font-weight:bold;\">"
-                << "You have revoked access for auth-token: "
-                << req.getvar("revoke")
+                "You have revoked access for auth-token: "
+                << htmlentities(req.getvar("revoke"))
                 << "</p>";
         }
+
+        typedef map<string,string> auth_t;
         vector< auth_t > v = m_pauth->get_all_authed();
         os  << "<p>"
-            << "The first time a site requests access to your Playdar, "
-            << "you'll have a chance to allow/deny it. You can see the list "
-            << "of authenticated sites here, and delete any if necessary."
-            << "</p>"
-            << "<table style=\"width:95%\">" << endl
-            <<  "<tr style=\"font-weight:bold;\">"
-            <<   "<td>Name</td>"
-            <<   "<td>Website</td>"
-            <<   "<td>Auth Code / User-Agent</td>"
-            <<   "<td>Options</td>"
-            <<  "</tr>"
+            "The first time a site requests access to your Playdar, "
+            "you'll have a chance to allow/deny it. You can see the list "
+            "of authenticated sites here, and delete any if necessary."
+            "</p>"
+            "<table style=\"width:95%\">"
+               "<tr style=\"font-weight:bold;\">"
+               "<td>Name</td>"
+               "<td>Website</td>"
+               "<td>Auth Code / User-Agent</td>"
+               "<td>Options</td>"
+              "</tr>"
             << endl;
         int i = 0;
         string formtoken = app()->resolver()->gen_uuid();
@@ -426,20 +433,21 @@ playdar_request_handler::handle_settings( const playdar_request& req,
         BOOST_FOREACH( auth_t &m, v )
         {
             os  << "<tr style=\"background-color:" << ((i++%2==0)?"#ccc":"") << ";\">"
-                <<  "<td>" << m["name"] << "</td>"
-                <<  "<td>" << m["website"] << "</td>"
-                <<  "<td>" << m["token"] << "<br/><small>"
-                <<  m["ua"] << "</small></td>"
-                <<  "<td><a href=\"/settings/auth/?revoke="  
-                << m["token"] <<"\">Revoke</a>"
-                <<  "</td>"
-                << "</tr>";
+                "<td>" << htmlentities(m["name"]) << "</td>"
+                "<td>" << htmlentities(m["website"]) << "</td>"
+                "<td>" << htmlentities(m["token"]) << "<br/><small>"
+                << htmlentities(m["ua"]) << "</small></td>"
+                "<td><a href=\"/settings/auth/?revoke="  
+                << htmlentities(m["token"]) << "\">Revoke</a>"
+                "</td>"
+                "</tr>";
         }
         os  << "</table>" << endl;
+
         serve_body( os.str(), rep );
     }
     else
-        rep.stock_reply(moost::http::reply::not_found);
+        rep.stock_reply(moost::http::reply::bad_request);
 }
 
 string 
@@ -481,16 +489,16 @@ playdar_request_handler::handle_queries_root(const playdar_request& req)
              os << "<td colspan=\"7\"><i>cancelled query</i></td>";
             } else if (rq->isValidTrack()) {
              os << "<td style=\"font-size:60%;\">" 
-                "<a href=\"/queries/"<< rq->id() <<"\">" << rq->id() << "</a></td>"
+                "<a href=\"/queries/"<< htmlentities(rq->id()) <<"\">" << htmlentities(rq->id()) << "</a></td>"
                 "<td style=\"align:center;\">"
                 "<form method=\"post\" action=\"\" style=\"margin:0; padding:0;\">"
-                "<input type=\"hidden\" name=\"qid\" value=\"" << rq->id() << "\"/>"
+                "<input type=\"hidden\" name=\"qid\" value=\"" << htmlentities(rq->id()) << "\"/>"
                 "<input type=\"submit\" value=\"X\" name=\"cancel_query\" style=\"margin:0; padding:0;\" title=\"Cancel and invalidate this query\"/></form>"
                 "</td>"
-                "<td>" << rq->param( "artist" ).get_str() << "</td>"
-                "<td>" << rq->param( "album" ).get_str() << "</td>"
-                "<td>" << rq->param( "track" ).get_str() << "</td>"
-                "<td>" << rq->from_name() << "</td>"
+                "<td>" << htmlentities(rq->param( "artist" ).get_str()) << "</td>"
+                "<td>" << htmlentities(rq->param( "album" ).get_str()) << "</td>"
+                "<td>" << htmlentities(rq->param( "track" ).get_str()) << "</td>"
+                "<td>" << htmlentities(rq->from_name()) << "</td>"
                 "<td " << (rq->solved()?"style=\"background-color: lightgreen;\"":"") << ">" 
                 << rq->num_results() << "</td>"
                 ; 
@@ -498,7 +506,7 @@ playdar_request_handler::handle_queries_root(const playdar_request& req)
                 os << "<td><i>non-track query</i></td>"
                 "<td colspan=\"6\" style=\"align:center;\">"
                 "<form method=\"post\" action=\"\" style=\"margin:0; padding:0;\">"
-                "<input type=\"hidden\" name=\"qid\" value=\"" << rq->id() << "\"/>"
+                "<input type=\"hidden\" name=\"qid\" value=\"" << htmlentities(rq->id()) << "\"/>"
                 "<input type=\"submit\" value=\"X\" name=\"cancel_query\" style=\"margin:0; padding:0;\" title=\"Cancel and invalidate this query\"/></form>"
                 "</td>";
             }
@@ -539,11 +547,11 @@ playdar_request_handler::handle_queries( const playdar_request& req,
            os  << "<h2>Query: " << qid << "</h2>"
                "<table>"
                "<tr><td>Artist</td>"
-               "<td>" << rq->param( "artist" ).get_str() << "</td></tr>"
+               "<td>" << htmlentities(rq->param( "artist" ).get_str()) << "</td></tr>"
                "<tr><td>Album</td>"
-               "<td>" << rq->param( "album" ).get_str() << "</td></tr>"
+               "<td>" << htmlentities(rq->param( "album" ).get_str()) << "</td></tr>"
                "<tr><td>Track</td>"
-               "<td>" << rq->param( "track" ).get_str() << "</td></tr>"
+               "<td>" << htmlentities(rq->param( "track" ).get_str()) << "</td></tr>"
                "</table>"
                "<h3>Results (" << results.size() << ")</h3>"
                "<table>"
@@ -570,15 +578,15 @@ playdar_request_handler::handle_queries( const playdar_request& req,
                bgc = ++i%2 ? "lightgrey" : "";
                os  << "<tr style=\"background-color:" << bgc << "\">"
                    "<td style=\"font-size:60%\">"
-                   "<a href=\"/sid/" << ri->id() << "\">" << ri->id() << "</a></td>"
-                   "<td>" << ri->json_value("artist", "" )  << "</td>"
-                   "<td>" << ri->json_value("album", "" )   << "</td>"
-                   "<td>" << ri->json_value("track", "" )   << "</td>"
-                   "<td>" << ri->json_value("duration", "" )<< "</td>"
-                   "<td>" << ri->json_value("bitrate", "" ) << "</td>"
-                   "<td>" << ri->json_value("size", "" )    << "</td>"
-                   "<td>" << ri->json_value("source", "" )  << "</td>"
-                   "<td>" << ri->json_value("score", "" )   << "</td>"
+                   "<a href=\"/sid/" << htmlentities(ri->id()) << "\">" << htmlentities(ri->id()) << "</a></td>"
+                   "<td>" << htmlentities(ri->json_value("artist", "" ))  << "</td>"
+                   "<td>" << htmlentities(ri->json_value("album", "" ))   << "</td>"
+                   "<td>" << htmlentities(ri->json_value("track", "" ))   << "</td>"
+                   "<td>" << htmlentities(ri->json_value("duration", "" ))<< "</td>"
+                   "<td>" << htmlentities(ri->json_value("bitrate", "" )) << "</td>"
+                   "<td>" << htmlentities(ri->json_value("size", "" ))    << "</td>"
+                   "<td>" << htmlentities(ri->json_value("source", "" ))  << "</td>"
+                   "<td>" << htmlentities(ri->json_value("score", "" ))   << "</td>"
                    "</tr>"
                    ;
            }
@@ -623,7 +631,7 @@ playdar_request_handler::handle_quickplay( const playdar_request& req,
     }
     
     string artist   = req.parts()[1];
-    string album    = req.parts()[2].length()?req.parts()[2]:"";
+    string album    = req.parts()[2];
     string track    = req.parts()[3];
     boost::shared_ptr<ResolverQuery> rq = TrackRQBuilder::build(artist, album, track);
     rq->set_from_name(app()->conf()->name());
@@ -636,40 +644,20 @@ playdar_request_handler::handle_quickplay( const playdar_request& req,
     boost::thread::sleep(time);
     vector< ri_ptr > results = app()->resolver()->get_results(qid);
     
-    if( !results.size() ) return;
-    
-    if( results[0]->json_value( "url", "" ).empty()) return;
-
-    json_spirit::Object ro = results[0]->get_json();
-    cout << "Top result:" <<endl;
-    json_spirit::write_formatted( ro, cout );
-    cout << endl;
-    string url = "/sid/";
-    url += results[0]->id();
-    rep.set_status( moost::http::reply::moved_temporarily );
-    rep.add_header( "Location", url );
-    rep.write_finish();
-}
-
-void 
-playdar_request_handler::handle_json_query(string query, const moost::http::request& req, moost::http::reply& rep)
-{
-    using namespace json_spirit;
-    cout << "Handling JSON query:" << endl << query << endl;
-    Value jval;
-
-    // what is this loop?
-    do
-    {
-        if(!read( query, jval )) break;
-        
-        return;
-        
-    } while(false);
-    
-    cerr << "Failed to parse JSON" << endl;
-    rep.write_content("error");
-    rep.write_finish();
+    if (results.size() && !results[0]->json_value( "url", "" ).empty()) {
+        json_spirit::Object ro = results[0]->get_json();
+        cout << "Top result:" <<endl;
+        json_spirit::write_formatted( ro, cout );
+        cout << endl;
+        string url = "/sid/";
+        url += results[0]->id();
+        rep.set_status( moost::http::reply::moved_temporarily );
+        rep.add_header( "Location", url );
+        rep.write_finish();
+    } else {
+        // we got nothing
+        rep.stock_reply( moost::http::reply::not_found );
+    }
 }
 
 void

@@ -17,25 +17,26 @@
 */
 
 #include <boost/progress.hpp>
+#include "sqlite3pp.h"
 #include "boffin.h"
 #include "BoffinDb.h"
 #include "RqlOpProcessor.h"
-#include "RqlOpProcessorTagCloud.h"
-#include "parser/parser.h"
+#include "RqlDbProcessor.h"
 #include "RqlOp.h"
 #include "BoffinSample.h"
 #include "SampleAccumulator.h"
 #include "SimilarArtists.h"
 
+#include "parser/parser.h"
 #include "playdar/utils/urlencoding.hpp"        // maybe this should be part of the plugin api then?
+#include "playdar/playdar_request.h"
 #include "playdar/resolved_item.h"
+#include "playdar/resolver_query.hpp"
 #include "../local/library.h"
 #include "../local/resolved_item_builder.hpp"
-#include "playdar/playdar_request.h"
-#include "BoffinRqUtil.hpp"
 
-using namespace fm::last::query_parser;
 using namespace std;
+using namespace fm::last::query_parser;
 
 static RqlOp root2op( const querynode_data& node )
 {
@@ -76,14 +77,19 @@ using namespace playdar;
 namespace TagCloudItem
 {
 
-    static ri_ptr createTagCloudItem(const std::string& name, float weight, int trackCount, const std::string& source)
+    static ri_ptr createTagCloudItem(
+        const std::string& name, 
+        float weight, 
+        int tracks, 
+        int seconds,
+        const std::string& source)
     {
         ri_ptr rip( new ResolvedItem );
         rip->set_json_value( "name", name );
         rip->set_json_value( "weight", weight );
-        rip->set_json_value( "count", trackCount );
+        rip->set_json_value( "count", tracks );
+        rip->set_json_value( "seconds", seconds );
         rip->set_json_value( "source", source );
-
         return rip;
     }
 
@@ -205,18 +211,38 @@ boffin::start_resolving(boost::shared_ptr<ResolverQuery> rq)
 
 static
 ri_ptr 
-makeTagCloudItem(const boost::tuple<std::string, float, int>& in, const std::string& source)
+makeTagCloudItem(const boost::tuple<std::string, float, int, int>& in, const std::string& source)
 {
-    return TagCloudItem::createTagCloudItem(in.get<0>(), in.get<1>(), in.get<2>(), source);
+    return TagCloudItem::createTagCloudItem(
+        in.get<0>(), 
+        in.get<1>(), 
+        in.get<2>(), 
+        in.get<3>(), 
+        source);
 }
 
+static
+void
+query_to_tagvec(boost::shared_ptr< BoffinDb::TagCloudVec > tv, sqlite3pp::query& qry)
+{
+    for (sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); i++) {
+        tv->push_back( i->get_columns<string, float, int, int>(0, 1, 2, 3) );
+    }
+}
+
+static
+void
+query_to_summary(boost::tuple<int, int>& summary, sqlite3pp::query& qry)
+{
+    summary = qry.begin()->get_columns<int, int>(0, 1);
+}
 
 void
 boffin::resolve(boost::shared_ptr<ResolverQuery> rq)
 {
-    if (rq->param_exists("boffin_rql") && rq->param_type("boffin_rql") == json_spirit::str_type) {
+    if (rq->param_exists("boffin_tracks") && rq->param_type("boffin_tracks") == json_spirit::str_type) {
         parser p;
-        if (p.parse(rq->param("boffin_rql").get_str())) {
+        if (p.parse(rq->param("boffin_tracks").get_str())) {
             std::vector<RqlOp> ops;
             p.getOperations<RqlOp>(
                 boost::bind(&std::vector<RqlOp>::push_back, boost::ref(ops), _1),
@@ -260,24 +286,26 @@ boffin::resolve(boost::shared_ptr<ResolverQuery> rq)
         string rql( rq->param("boffin_tags").get_str() );
 
         shared_ptr< BoffinDb::TagCloudVec > tv;
-
         {
             progress_timer t;
             if (rql == "*") {
                 tv = m_db->get_tag_cloud();
             } else {
-                parser p;
-                if (p.parse(rql)) {
-                    std::vector<RqlOp> ops;
-                    p.getOperations<RqlOp>(
-                        boost::bind(&std::vector<RqlOp>::push_back, boost::ref(ops), _1),
-                        &root2op, 
-                        &leaf2op);
-                    tv = RqlOpProcessorTagCloud::process(ops.begin(), ops.end(), *m_db, *m_sa);
-                } else {
-                    parseFail(p.getErrorLine(), p.getErrorOffset());
-                    return;
-                }
+                tv = shared_ptr< BoffinDb::TagCloudVec >( new BoffinDb::TagCloudVec );
+                bool ok = RqlDbProcessor::parseAndProcess(
+                    rql, 
+                    "SELECT name, sum(weight), count(weight), sum(pd.file.duration) "
+                    "FROM track_tag "
+                    "INNER JOIN tag ON track_tag.tag = tag.rowid "
+                    "INNER JOIN pd.file_join ON track_tag.track = pd.file_join.track "
+                    "INNER JOIN pd.file ON pd.file_join.file = pd.file.id "
+                    "WHERE track_tag.track IN ",
+                    "GROUP BY tag.rowid",
+                    *m_db, *m_sa,
+                    boost::bind(&query_to_tagvec, tv, _1));
+                if (!ok) {
+                    cout << "Boffin rql parse error: " << rql << endl;
+                } 
             }
             cout << "Boffin retrieved tagcloud..";
         }
@@ -298,6 +326,41 @@ boffin::resolve(boost::shared_ptr<ResolverQuery> rq)
             m_pap->report_results(rq->id(), results);
             cout << "Boffin reported tagcloud..";
         }
+    } else if (rq->param_exists("boffin_summary") && rq->param_type("boffin_summary") == json_spirit::str_type) {
+        string rql( rq->param("boffin_summary").get_str() );
+
+        boost::tuple<int, int> summary(-1, -1);     // numer of files, total duration
+        {
+            boost::progress_timer t;
+            if (rql == "*") {
+                summary = m_db->summary();
+            } else {
+                bool ok = RqlDbProcessor::parseAndProcess(
+                    rql, 
+                    "SELECT count(pd.file.duration), sum(pd.file.duration) "
+                    "FROM pd.file_join "
+                    "INNER JOIN pd.file ON pd.file_join.file = pd.file.id "
+                    "WHERE pd.file_join.track IN ",
+                    "",
+                    *m_db, *m_sa,
+                    boost::bind(&query_to_summary, boost::ref(summary), _1));
+                if (!ok) {
+                    cout << "Boffin rql parse error: " << rql << endl;
+                } 
+            }
+        }
+
+        if (summary.get<0>() != -1) {
+            boost::progress_timer t;
+            json_spirit::Object js;
+            js.push_back( json_spirit::Pair( "source", m_pap->hostname()) );
+            js.push_back( json_spirit::Pair( "files", summary.get<0>()) );
+            js.push_back( json_spirit::Pair( "seconds", summary.get<1>()) );
+            std::vector< json_spirit::Object > results;
+            results.push_back( js );            
+            m_pap->report_results(rq->id(), results);
+            cout << "Boffin reported summary..";
+        }
     }
 
 }
@@ -310,10 +373,10 @@ boffin::parseFail(std::string line, int error_offset)
 }
 
 
-// handler for boffin HTTP reqs we are registerd for:
+// handler for boffin HTTP reqs we are registered for:
 //
 // req->parts()[0] = "boffin"
-//             [1] = "tagcloud" or "rql"
+//             [1] = "tagcloud", "summary" or "tracks"
 //             [2] = rql (optional)
 //
 bool
@@ -322,47 +385,37 @@ boffin::authed_http_handler(const playdar_request& req, playdar_response& resp, 
     if(req.parts().size() <= 1) {
         return false;
     }
-    
-    std::string comet_session_id;
-    if (req.getvar_exists("comet"))
-        comet_session_id = req.getvar("comet");
 
-    rq_ptr rq;
-    if( req.parts()[1] == "tagcloud" )
-    {
-        std::string rql(
-            req.parts().size() > 2 ? 
-            playdar::utils::url_decode( req.parts()[2] ) : 
-            "*" );
-        rq = BoffinRQUtil::buildTagCloudRequest(rql, comet_session_id);
-        
-    }
-    else if( req.parts()[1] == "rql" && req.parts().size() > 2)
-    {
-        rq = BoffinRQUtil::buildRQLRequest( playdar::utils::url_decode( req.parts()[2] ), comet_session_id );
-    }
-    else
-    {
-        return false;
-    }
-
-    if( !rq )
-    {
+    const char* operation;
+    if (req.parts()[1] == "tags") {
+        operation = "boffin_tags";
+    } else if (req.parts()[1] == "tracks") {
+        operation = "boffin_tracks";
+    } else if (req.parts()[1] == "summary") {
+        operation = "boffin_summary";
+    } else {
         resp = "Error!";
         return true;
     }
-    
+
+    rq_ptr rq(new playdar::ResolverQuery);
+
+    string rql("*");
+    if (req.parts().size() > 2)
+        rql = playdar::utils::url_decode( req.parts()[2] );
+    rq->set_param(operation, rql);
+
+    if (req.getvar_exists("comet"))
+        rq->set_comet_session_id(req.getvar("comet"));
+
     rq->set_from_name( m_pap->hostname() );
     rq->set_origin_local( true );
     
-    if( req.getvar_exists( "qid" ))
-    {
-        if( !m_pap->query_exists(req.getvar("qid")) )
-        {
-            rq->set_id( req.getvar("qid") );
-        }
-        else
-        {
+    if (req.getvar_exists("qid")) {
+        string qid = req.getvar("qid");
+        if (!m_pap->query_exists(qid)) {
+            rq->set_id(qid);
+        } else {
             cout << "WARNING - boffin request provided a QID, but that QID already exists as a running query. Assigning a new QID." << endl;
         }
     }
@@ -383,8 +436,9 @@ boffin::authed_http_handler(const playdar_request& req, playdar_response& resp, 
     return true;
 }
 
-json_spirit::Object 
-boffin::get_capabilities() const
+// virtual
+json_spirit::Value
+boffin::capabilities() const
 {
     json_spirit::Object o;
     o.push_back( json_spirit::Pair( "plugin", name() ));

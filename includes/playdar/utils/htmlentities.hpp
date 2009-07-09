@@ -15,26 +15,26 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-#include "playdar/playdar_plugin_include.h"
-#include "playdar/resolver_query.hpp"
-#include "playdar/types.h"
-#include <string>
+#ifndef HTML_ESCAPE_HPP
+#define HTML_ESCAPE_HPP
 
-namespace BoffinRQUtil
+#include <string>
+#include <boost/algorithm/string.hpp>
+
+namespace playdar {
+namespace utils { 
+
+// return a string with &<>" characters replaced with html entities
+std::string htmlentities(const std::string& a)
 {
-    playdar::rq_ptr buildTagCloudRequest( const std::string& rql, const std::string& comet_session_id )
-    {
-        playdar::rq_ptr rq( new playdar::ResolverQuery );
-        rq->set_param( "boffin_tags", rql );
-        rq->set_comet_session_id( comet_session_id );
-        return rq;
-    }
-    
-    playdar::rq_ptr buildRQLRequest( const std::string& rql, const std::string& comet_session_id )
-    {
-        playdar::rq_ptr rq( new playdar::ResolverQuery );
-        rq->set_param( "boffin_rql", rql );
-        rq->set_comet_session_id( comet_session_id );
-        return rq;        
-    }
+    std::string b(a);
+    boost::replace_all(b, "&", "&amp;");
+    boost::replace_all(b, "<", "&lt;");
+    boost::replace_all(b, ">", "&gt;");
+    boost::replace_all(b, "\"", "&quot;");
+    return b;
 }
+
+}}
+
+#endif

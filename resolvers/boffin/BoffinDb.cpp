@@ -91,36 +91,42 @@ BoffinDb::create_db_schema()
 boost::shared_ptr<BoffinDb::TagCloudVec> 
 BoffinDb::get_tag_cloud(int limit /* = 0 */)
 {
-    sqlite3pp::query qry(m_db, 
-        limit <= 0 ?
-        "SELECT name, sum(weight), count(weight) "
+    char *query =
+        "SELECT name, sum(weight), count(weight), sum(pd.file.duration) "
         "FROM track_tag "
         "INNER JOIN tag ON track_tag.tag = tag.rowid "
-        "GROUP BY tag.rowid"
-        :
-        "SELECT name, sum(weight), count(weight) "
-        "FROM track_tag "
-        "INNER JOIN tag ON track_tag.tag = tag.rowid "
-        "GROUP BY tag.rowid "
-        "LIMIT ?");
-    if (limit) {
+        "INNER JOIN pd.file_join ON track_tag.track = pd.file_join.track "
+        "INNER JOIN pd.file ON pd.file_join.file = pd.file.id "
+        "GROUP BY tag.rowid ";
+
+    sqlite3pp::query qry(m_db);
+    if (limit <= 0) {
+        qry.prepare(query);
+    } else {
+        qry.prepare(string(query).append(" ORDER BY count(weight) LIMIT ?").data());
         qry.bind(1, limit);
     }
 
     boost::shared_ptr<TagCloudVec> p( new TagCloudVec() );
     float maxWeight = 0;
     for(sqlite3pp::query::iterator i = qry.begin(); i != qry.end(); ++i) {
-        p->push_back( i->get_columns<string, float, int>(0, 1, 2) );
+        p->push_back( i->get_columns<string, float, int, int>(0, 1, 2, 3) );
         maxWeight = max( maxWeight, p->back().get<1>() );
     }
     
-    //if (maxWeight > 0) {
-    //    for( TagCloudVec::iterator i = p->begin(); i != p->end(); ++i ) {
-    //        i->get<1>() = i->get<1>() / maxWeight;
-    //    }
-    //}
-    
     return p;
+}
+
+// returns a tuple of: the count of files, total duration
+boost::tuple<int, int>
+BoffinDb::summary()
+{
+    sqlite3pp::query qry(m_db, "SELECT count(duration), sum(duration) FROM pd.file");
+    sqlite3pp::query::iterator i = qry.begin();
+    if (i != qry.end()) {
+        return i->get_columns<int, int>(0, 1);
+    }
+    return boost::tuple<int, int>(-1, -1);
 }
 
 void
