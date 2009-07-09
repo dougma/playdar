@@ -41,7 +41,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="../../../includes;../../../deps/json_spirit_v3.00;../../../deps/pdl-0.3.0/include;../../../deps/sqlite3pp-read-only;../../../deps/sqlite-amalgamation-3_6_12;../../../deps/libcurl-7.19.3/include"
-				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;BOFFIN_EXPORTS;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;NOMINMAX;_WIN32_WINNT;WIN32_LEAN_AND_MEAN"
+				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;BOFFIN_EXPORTS;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;NOMINMAX;_WIN32_WINNT;WIN32_LEAN_AND_MEAN;CURL_STATICLIB"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -61,7 +61,6 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="curllib.lib"
 				OutputFile="..\..\debug\bin\$(ProjectName).resolver"
 				LinkIncremental="2"
 				AdditionalLibraryDirectories="../../debug/lib"
@@ -120,7 +119,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				AdditionalIncludeDirectories="../../../includes;../../../deps/json_spirit_v3.00;../../../deps/pdl-0.3.0/include;../../../deps/sqlite3pp-read-only;../../../deps/sqlite-amalgamation-3_6_12;../../../deps/libcurl-7.19.3/include"
-				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;BOFFIN_EXPORTS;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;NOMINMAX;_WIN32_WINNT;WIN32_LEAN_AND_MEAN"
+				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;BOFFIN_EXPORTS;_CRT_SECURE_NO_DEPRECATE;_SCL_SECURE_NO_DEPRECATE;NOMINMAX;_WIN32_WINNT;WIN32_LEAN_AND_MEAN;CURL_STATICLIB"
 				RuntimeLibrary="2"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -138,7 +137,6 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="curllib.lib"
 				OutputFile="..\..\release\bin\$(ProjectName).resolver"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="../../release/lib"
