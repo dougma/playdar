@@ -53,7 +53,11 @@ public:
     std::string config_dir() const
     {
         boost::filesystem::path p(m_filename);
+#if BOOST_VERSION >= 103600
         return p.parent_path().string();
+#else
+        return p.branch_path().string();
+#endif
     }
     
     void reload()
